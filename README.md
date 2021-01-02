@@ -18,5 +18,11 @@ An electronic version is available at:
 
 ```
 $> img-diff ./testdata/circle-0.png ./testdata/circle-1.png
+```
+![img-circle](https://github.com/sbinet/img-diff/raw/main/testdata/circle-out.png)
+
+
+```
 $> img-diff ./testdata/func-0.png   ./testdata/func-1.png
 ```
+![img-func](https://github.com/sbinet/img-diff/raw/main/testdata/func-out.png)

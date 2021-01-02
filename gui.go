@@ -12,12 +12,14 @@ import (
 	"image/gif"
 	"image/jpeg"
 	"image/png"
+	"log"
 	"math"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"gioui.org/app"
+	"gioui.org/app/headless"
 	"gioui.org/f32"
 	"gioui.org/font/gofont"
 	"gioui.org/io/key"
@@ -52,9 +54,9 @@ type UI struct {
 	img2 image.Image
 	diff image.Image
 
-	dmin  float64
-	dmax  float64
-	width int
+	dmin float64
+	dmax float64
+	size image.Point
 
 	ctx   layout.Context
 	theme *material.Theme
@@ -69,7 +71,7 @@ func NewUI(img1, img2 image.Image) *UI {
 		diff:  diff,
 		dmin:  dmin,
 		dmax:  dmax,
-		width: width,
+		size:  image.Pt(width, height),
 		theme: material.NewTheme(gofont.Collection()),
 	}
 }
@@ -85,7 +87,7 @@ func (ui *UI) run() {
 		switch e := e.(type) {
 		case system.FrameEvent:
 			gtx := layout.NewContext(new(op.Ops), e)
-			ui.width = e.Size.X
+			ui.size = e.Size
 			ui.Layout(gtx)
 			e.Frame(gtx.Ops)
 		case key.Event:
@@ -95,6 +97,12 @@ func (ui *UI) run() {
 
 			case "R":
 				// TODO: rescale/resize
+
+			case "F11":
+				err := ui.screenshot()
+				if err != nil {
+					log.Fatalf("could not take screenshot: %+v", err)
+				}
 			}
 		case system.DestroyEvent:
 			os.Exit(0)
@@ -172,10 +180,46 @@ func (ui *UI) Layout(gtx C) D {
 }
 
 func (ui *UI) scale(img image.Image) float32 {
-	sz := 0.5 * float32(ui.width-100)
+	sz := 0.5 * float32(ui.size.X-100)
 	dx := float32(img.Bounds().Dx())
 	scale := dx / sz
 	return 1 / scale
+}
+
+func (ui *UI) screenshot() error {
+	head, err := headless.NewWindow(ui.size.X, ui.size.Y)
+	if err != nil {
+		return err
+	}
+
+	gtx := layout.Context{
+		Ops:         new(op.Ops),
+		Constraints: layout.Exact(ui.size),
+	}
+	ui.Layout(gtx)
+
+	err = head.Frame(gtx.Ops)
+	if err != nil {
+		return err
+	}
+
+	img, err := head.Screenshot()
+	if err != nil {
+		return err
+	}
+
+	f, err := os.Create("out.png")
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	err = png.Encode(f, img)
+	if err != nil {
+		return err
+	}
+
+	return f.Close()
 }
 
 type Image struct {
