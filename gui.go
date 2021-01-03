@@ -5,6 +5,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"image"
 	"image/color"
@@ -32,7 +33,11 @@ import (
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
+	"go-hep.org/x/hep/hbook"
+	"go-hep.org/x/hep/hplot"
 	"golang.org/x/image/tiff"
+	"gonum.org/v1/plot"
+	"gonum.org/v1/plot/vg"
 )
 
 type (
@@ -53,6 +58,7 @@ type UI struct {
 	img1 image.Image
 	img2 image.Image
 	diff image.Image
+	hist image.Image
 
 	dmin float64
 	dmax float64
@@ -63,12 +69,16 @@ type UI struct {
 }
 
 func NewUI(img1, img2 image.Image) *UI {
-	diff, dmin, dmax := imageDiff(img1, img2)
+	diff, dmin, dmax, h := imageDiff(img1, img2)
+
+	dims := image.Pt(diff.Bounds().Dx(), diff.Bounds().Dy())
+	hist := histDiff(h, dims)
 
 	return &UI{
 		img1:  img1,
 		img2:  img2,
 		diff:  diff,
+		hist:  hist,
 		dmin:  dmin,
 		dmax:  dmax,
 		size:  image.Pt(width, height),
@@ -121,7 +131,7 @@ func (ui *UI) Layout(gtx C) D {
 					return list.Layout(gtx, len(imgs),
 						func(gtx C, i int) D {
 							img := imgs[i]
-							scale := ui.scale(img)
+							scale := ui.xscale(img)
 							return widget.Border{
 								Color: color.NRGBA{A: 255},
 								Width: unit.Dp(2),
@@ -153,21 +163,31 @@ func (ui *UI) Layout(gtx C) D {
 		},
 
 		func(gtx C) D {
-			return layout.UniformInset(defaultMargin).Layout(gtx, func(gtx C) D {
-				return layout.Center.Layout(gtx, func(gtx C) D {
-					return widget.Border{
-						Color: color.NRGBA{A: 255},
-						Width: unit.Dp(2),
-					}.Layout(gtx, func(gtx C) D {
-						img := ui.diff
-						scale := ui.scale(img)
-						return Image{
-							Src:   paint.NewImageOp(img),
-							Scale: scale,
-						}.Layout(gtx)
-					})
-				})
-			})
+			return layout.Center.Layout(
+				gtx,
+				func(gtx C) D {
+					imgs := []image.Image{ui.diff, ui.hist}
+					list := &layout.List{Axis: layout.Horizontal}
+					return list.Layout(gtx, len(imgs),
+						func(gtx C, i int) D {
+							img := imgs[i]
+							scale := ui.xscale(img)
+							return widget.Border{
+								Color: color.NRGBA{A: 255},
+								Width: unit.Dp(2),
+							}.Layout(gtx, func(gtx C) D {
+								return layout.UniformInset(defaultMargin).Layout(
+									gtx,
+									Image{
+										Src:   paint.NewImageOp(img),
+										Scale: scale,
+									}.Layout,
+								)
+							})
+						},
+					)
+				},
+			)
 		},
 	}
 
@@ -179,10 +199,17 @@ func (ui *UI) Layout(gtx C) D {
 	})
 }
 
-func (ui *UI) scale(img image.Image) float32 {
+func (ui *UI) xscale(img image.Image) float32 {
 	sz := 0.5 * float32(ui.size.X-100)
 	dx := float32(img.Bounds().Dx())
 	scale := dx / sz
+	return 1 / scale
+}
+
+func (ui *UI) yscale(img image.Image) float32 {
+	sz := 1. / 3. * float32(ui.size.Y)
+	dy := float32(img.Bounds().Dy())
+	scale := dy / sz
 	return 1 / scale
 }
 
@@ -295,7 +322,7 @@ func loadImage(name string) (image.Image, error) {
 	}
 }
 
-func imageDiff(v1, v2 image.Image) (image.Image, float64, float64) {
+func imageDiff(v1, v2 image.Image) (image.Image, float64, float64, *hbook.H1D) {
 	img1, ok := v1.(*image.RGBA)
 	if !ok {
 		img1 = newRGBAFrom(v1)
@@ -306,6 +333,7 @@ func imageDiff(v1, v2 image.Image) (image.Image, float64, float64) {
 		img2 = newRGBAFrom(v2)
 	}
 
+	h := hbook.NewH1D(100, 0, 1)
 	r1 := img1.Bounds()
 	r2 := img2.Bounds()
 	diff := image.NewGray16(r1.Union(r2))
@@ -323,6 +351,7 @@ func imageDiff(v1, v2 image.Image) (image.Image, float64, float64) {
 			c1 := img1.RGBAAt(x, y)
 			c2 := img2.RGBAAt(x, y)
 			vd := yiqDiff(c1, c2)
+			h.Fill(vd, 1)
 			if vd > 0 {
 				dmin = math.Min(vd, dmin)
 			}
@@ -330,7 +359,7 @@ func imageDiff(v1, v2 image.Image) (image.Image, float64, float64) {
 			diff.SetGray16(x, y, color.Gray16{Y: uint16(vd * math.MaxUint16)})
 		}
 	}
-	return diff, dmin, dmax
+	return diff, dmin, dmax, h
 }
 
 // yiqDiff returns the normalized difference between the colors of 2 pixels,
@@ -379,4 +408,40 @@ func newRGBAFrom(src image.Image) *image.RGBA {
 	)
 	draw.Draw(dst, bnds, src, image.Point{}, draw.Src)
 	return dst
+}
+
+func histDiff(h *hbook.H1D, dims image.Point) image.Image {
+	p := hplot.New()
+	p.Title.Text = "YIQ distribution"
+	p.X.Label.Text = "delta(YIQ)"
+	p.Y.Scale = plot.LogScale{}
+	p.Y.Tick.Marker = plot.LogTicks{}
+
+	hh := hplot.NewH1D(h)
+	hh.LineStyle.Color = color.RGBA{B: 255, A: 255}
+	hh.LogY = true
+	p.Add(hh, hplot.NewGrid())
+
+	x := vg.Length(dims.X)
+	y := vg.Length(dims.Y)
+	canvas, err := p.WriterTo(x, y, "png")
+	if err != nil {
+		log.Printf("could not create writer-to plot: %+v", err)
+		return nil
+	}
+
+	buf := new(bytes.Buffer)
+	_, err = canvas.WriteTo(buf)
+	if err != nil {
+		log.Printf("could not write plot: %+v", err)
+		return nil
+	}
+
+	img, err := png.Decode(buf)
+	if err != nil {
+		log.Printf("could not encode plot plot: %+v", err)
+		return nil
+	}
+
+	return img
 }
