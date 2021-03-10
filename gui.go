@@ -20,9 +20,9 @@ import (
 	"strings"
 
 	"gioui.org/app"
-	"gioui.org/app/headless"
 	"gioui.org/f32"
 	"gioui.org/font/gofont"
+	"gioui.org/gpu/headless"
 	"gioui.org/io/key"
 	"gioui.org/io/system"
 	"gioui.org/layout"
@@ -266,7 +266,7 @@ func (img Image) Layout(gtx layout.Context) layout.Dimensions {
 	w, h := gtx.Px(unit.Dp(x*scale)), gtx.Px(unit.Dp(y*scale))
 	cs := gtx.Constraints
 	d := cs.Constrain(image.Pt(w, h))
-	stack := op.Push(gtx.Ops)
+	state := op.Save(gtx.Ops)
 	clip.Rect(image.Rectangle{Max: d}).Add(gtx.Ops)
 
 	aff := f32.Affine2D{}.Scale(
@@ -277,7 +277,7 @@ func (img Image) Layout(gtx layout.Context) layout.Dimensions {
 
 	img.Src.Add(gtx.Ops)
 	paint.PaintOp{}.Add(gtx.Ops)
-	stack.Pop()
+	state.Load()
 	return layout.Dimensions{Size: d}
 }
 
