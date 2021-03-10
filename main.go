@@ -6,7 +6,9 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
+	"os"
 
 	"gioui.org/app"
 )
@@ -15,6 +17,10 @@ func main() {
 	log.SetPrefix("img-diff: ")
 	log.SetFlags(0)
 
+	var (
+		batch = flag.Bool("batch", false, "enable batch mode")
+		diff  = flag.Float64("max", 0.1, "maximum allowed difference in batch mode")
+	)
 	flag.Parse()
 
 	if flag.NArg() < 2 {
@@ -32,6 +38,16 @@ func main() {
 	}
 
 	gui := NewUI(img1, img2)
+	if *batch {
+		fmt.Printf("diff=[%g, %g]\n", gui.dmin, gui.dmax)
+		switch {
+		case gui.dmax > *diff:
+			os.Exit(1)
+		default:
+			os.Exit(0)
+		}
+	}
+
 	go gui.run()
 
 	app.Main()
