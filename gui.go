@@ -359,6 +359,9 @@ func imageDiff(v1, v2 image.Image) (image.Image, float64, float64, *hbook.H1D) {
 			diff.SetGray16(x, y, color.Gray16{Y: uint16(vd * math.MaxUint16)})
 		}
 	}
+	if dmin == math.MaxFloat64 {
+		dmin = 0
+	}
 	return diff, dmin, dmax, h
 }
 
